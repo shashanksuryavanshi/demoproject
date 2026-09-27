@@ -1,0 +1,48 @@
+trigger:
+  branches:
+    include: [ main ]
+
+variables:
+  acrLoginServer: 'emfiacrdev.azurecr.io'
+  imageRepository: 'java-demo'
+  tag: '$(Build.BuildId)'
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+- stage: Build
+  jobs:
+  - job: BuildPush
+    steps:
+    - task: Docker@2
+      displayName: Build and push image
+      inputs:
+        command: buildAndPush
+        containerRegistry: 'sc_acr_test'
+        repository: $(imageRepository)
+        dockerfile: Dockerfile
+        tags: $(tag)
+    - publish: manifests
+      artifact: manifests
+
+- stage: Deploy
+  dependsOn: Build
+  jobs:
+  - job: DeployAKS
+    steps:
+    - download: current
+      artifact: manifests
+    - task: KubernetesManifest@1
+      displayName: Deploy to AKS
+      inputs:
+        action: deploy
+        connectionType: azureResourceManager
+        azureSubscriptionConnection: 'new_sa_acr'
+        azureResourceGroup: 'rg-emfi-dev'
+        kubernetesCluster: 'aks-emfi-dev'
+        namespace: default
+        manifests: |
+          $(Pipeline.Workspace)/manifests/deployment.yaml
+          $(Pipeline.Workspace)/manifests/service.yaml
+        containers: $(acrLoginServer)/$(imageRepository):$(tag)
